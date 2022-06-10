@@ -8,6 +8,7 @@ class OmServiceMeshClient {
         this.serviceAddress = config.serviceAddress;
         this.serviceHostname = require('os').hostname();
         this.tempMessages = [];
+        this.tempEvents = {};
         this.connect();
     }
 
@@ -19,6 +20,7 @@ class OmServiceMeshClient {
             console.log('\x1B[32m[OmServiceMeshClient] service master connected\x1B[0m')
             this.register();
             this.tempMessages.forEach(msg => this.ws.send(msg));
+            this.tempMessages = [];
         });
 
         this.ws.on('message', data => {
@@ -29,8 +31,12 @@ class OmServiceMeshClient {
             }
             try {
                 data = JSON.parse(data);
-                if ('emit' === data.type) {
-                    this.ws.emit(data.eventName, data.eventData);
+                if (data.type) {
+                    if ('emit' === data.type) {
+                        this.ws.emit(data.eventName, data.eventData);
+                    } else {
+                        this.ws.emit(data.type, data);
+                    }
                 }
             } catch (e) {
                 console.error('[OmServiceMeshClient] received no json data:', data);
@@ -43,8 +49,16 @@ class OmServiceMeshClient {
 
         this.ws.on('close', error => {
             console.error('[OmServiceMeshClient] service master connection close:', error);
-            setTimeout(() => this.connect(), 3000);
+            setTimeout(() => this.reconnect(), 3000);
         });
+    }
+
+    reconnect() {
+        this.ws = null;
+        this.connect();
+        for (let eventName in this.tempEvents) {
+            this.tempEvents[eventName].forEach(e => this.ws.on(eventName, e));
+        }
     }
 
     register() {
@@ -61,6 +75,8 @@ class OmServiceMeshClient {
     on(eventName, callback) {
         if (!eventName) throw Error('need event name');
         if (typeof callback !== 'function') throw Error('need event callback');
+        if (!this.tempEvents[eventName]) this.tempEvents[eventName] = [];
+        this.tempEvents[eventName].push(callback);
         this.ws.on(eventName, callback);
     }
 
